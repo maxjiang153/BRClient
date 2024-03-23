@@ -124,8 +124,8 @@
       "Properties": {
         "RetentionInDays": 30
       },
-      "UpdateReplacePolicy": "Delete",
-      "DeletionPolicy": "Delete"
+      "UpdateReplacePolicy": "Retain",
+      "DeletionPolicy": "Retain"
     },
     "BRClientDeployLambdaRole": {
       "Type": "AWS::IAM::Role",
@@ -210,7 +210,7 @@
       "Type": "AWS::Lambda::Function",
       "Properties": {
         "Code": {
-          "ZipFile": "\nimport os\nimport json\nimport boto3\nimport shutil\nimport logging\nimport subprocess\nimport contextlib\nfrom uuid import uuid4\nfrom zipfile import ZipFile\nfrom urllib.request import Request, urlopen, urlretrieve\n\nlogger = logging.getLogger()\nlogger.setLevel(logging.INFO)\n\ncloudfront = boto3.client('cloudfront')\ns3c = boto3.client('s3')\ns3r = boto3.resource('s3')\n\nCFN_SUCCESS = \"SUCCESS\"\nCFN_FAILED = \"FAILED\"\n\ndef handler(event, context):\n    def cfn_error(message=None):\n        logger.error(\"| cfn_error: %s\" % message)\n        cfn_send(event, context, CFN_FAILED, reason=message, physicalResourceId=event.get('PhysicalResourceId', None))\n\n    def cfn_send(event, context, responseStatus, responseData={}, physicalResourceId=None, noEcho=False, reason=None):\n        responseUrl = event['ResponseURL']\n        \n        responseBody = {}\n        responseBody['Status'] = responseStatus\n        responseBody['Reason'] = reason or ('See the details in CloudWatch Log Stream: ' + context.log_stream_name)\n        responseBody['PhysicalResourceId'] = physicalResourceId or context.log_stream_name\n        responseBody['StackId'] = event['StackId']\n        responseBody['RequestId'] = event['RequestId']\n        responseBody['LogicalResourceId'] = event['LogicalResourceId']\n        responseBody['NoEcho'] = noEcho\n        responseBody['Data'] = responseData\n        \n        body = json.dumps(responseBody)\n        logger.info(\"| response body:\\n\" + body)\n\n        headers = {\n            'content-type' : '',\n            'content-length' : str(len(body))\n        }\n\n        try:\n            request = Request(responseUrl, method='PUT', data=bytes(body.encode('utf-8')), headers=headers)\n            with contextlib.closing(urlopen(request)) as response:\n                logger.info(\"| status code: \" + response.reason)\n        except Exception as e:\n            logger.error(\"| unable to send response to CloudFormation\")\n            logger.exception(e)\n\n    def cloudfront_invalidate(distribution_id):\n        distribution_paths = [\"/*\"]\n        invalidation_resp = cloudfront.create_invalidation(\n            DistributionId=distribution_id,\n            InvalidationBatch={\n                'Paths': {\n                    'Quantity': len(distribution_paths),\n                    'Items': distribution_paths\n                },\n                'CallerReference': str(uuid4()),\n            })\n\n        cloudfront.get_waiter('invalidation_completed').wait(\n            DistributionId=distribution_id,\n            Id=invalidation_resp['Invalidation']['Id'])\n\n    def clean_bucket(target_bucket_name):\n        bucket = s3r.Bucket(target_bucket_name)\n\n        bucket.objects.all().delete()\n\n    def unzip(archive, contents_dir):\n        with ZipFile(archive, \"r\") as zip:\n            zip.extractall(contents_dir)\n\n    def upload(target_bucket_name, contents_dir):\n        try:\n            for path, subdirs, files in os.walk(contents_dir):\n                for file in files:\n                    dest_path = path.replace(contents_dir,\"\")\n                    __s3file = os.path.normpath(dest_path + '/' + file)[1:]\n                    __local_file = os.path.join(path, file)\n                    s3c.upload_file(__local_file, target_bucket_name, __s3file)\n        except Exception as e:\n            logger.error(\"| unable to upload file to s3\")\n            logger.exception(e)\n\n    def deploy(br_client_download_url, target_bucket_name):\n        temp_br_client_file = \"/tmp/brclient.zip\"\n        contents_dir = \"/tmp/brclient\"\n\n        if os.path.isdir(contents_dir):\n            shutil.rmtree(contents_dir);\n\n        os.mkdir(contents_dir)\n\n        urlretrieve(br_client_download_url, temp_br_client_file)\n\n        logger.info(\"download BRClient finished\")\n\n        unzip(temp_br_client_file, contents_dir)\n\n        logger.info(\"unzip BRClient finished\")\n\n        upload(target_bucket_name, contents_dir);\n\n        logger.info(\"upload BRClient finished\")\n\n\n    logger.info({ key:value for (key, value) in event.items() if key != 'ResponseURL'})\n\n    request_type = event['RequestType']\n    physical_id = event.get('PhysicalResourceId', None)\n    br_client_download_url = os.environ['BRClientDownloadUrl']\n    target_bucket_name = os.environ['TargetBucketName']\n    distribution_id = os.environ['DistributionId']\n\n    try:\n        if request_type == \"Create\":\n            physical_id = \"BRClientDeployment-%s\" % str(uuid4())\n        else:\n            if not physical_id:\n                cfn_error(\"invalid request: request type is '%s' but 'PhysicalResourceId' is not defined\" % {request_type})\n                return\n\n        if request_type == \"Delete\" or request_type == \"Update\":\n            clean_bucket(target_bucket_name)\n\n        if request_type == \"Update\" or request_type == \"Create\":\n            deploy(br_client_download_url, target_bucket_name)\n            cloudfront_invalidate(distribution_id)\n\n        cfn_send(event, context, CFN_SUCCESS, physicalResourceId=physical_id, responseData={\n          'BRClientDownloadUrl': br_client_download_url,\n        })\n    except Exception as e:\n        logger.error(\"| FAILED\")\n        logger.exception(e)\n        cfn_error(\"failed, please check cloudwatch log\")\n    \n      "
+          "ZipFile": "\nimport os\nimport json\nimport boto3\nimport shutil\nimport logging\nimport mimetypes\nimport subprocess\nimport contextlib\nfrom uuid import uuid4\nfrom zipfile import ZipFile\nfrom urllib.request import Request, urlopen, urlretrieve\n\nlogger = logging.getLogger()\nlogger.setLevel(logging.INFO)\n\ncloudfront = boto3.client('cloudfront')\ns3c = boto3.client('s3')\ns3r = boto3.resource('s3')\n\nCFN_SUCCESS = \"SUCCESS\"\nCFN_FAILED = \"FAILED\"\n\ndef handler(event, context):\n    def cfn_error(message=None):\n        logger.error(\"| cfn_error: %s\" % message)\n        cfn_send(event, context, CFN_FAILED, reason=message, physicalResourceId=event.get('PhysicalResourceId', None))\n\n    def cfn_send(event, context, responseStatus, responseData={}, physicalResourceId=None, noEcho=False, reason=None):\n        responseUrl = event['ResponseURL']\n        \n        responseBody = {}\n        responseBody['Status'] = responseStatus\n        responseBody['Reason'] = reason or ('See the details in CloudWatch Log Stream: ' + context.log_stream_name)\n        responseBody['PhysicalResourceId'] = physicalResourceId or context.log_stream_name\n        responseBody['StackId'] = event['StackId']\n        responseBody['RequestId'] = event['RequestId']\n        responseBody['LogicalResourceId'] = event['LogicalResourceId']\n        responseBody['NoEcho'] = noEcho\n        responseBody['Data'] = responseData\n        \n        body = json.dumps(responseBody)\n        logger.info(\"| response body:\\n\" + body)\n\n        headers = {\n            'content-type' : '',\n            'content-length' : str(len(body))\n        }\n\n        try:\n            request = Request(responseUrl, method='PUT', data=bytes(body.encode('utf-8')), headers=headers)\n            with contextlib.closing(urlopen(request)) as response:\n                logger.info(\"| status code: \" + response.reason)\n        except Exception as e:\n            logger.error(\"| unable to send response to CloudFormation\")\n            logger.exception(e)\n\n    def cloudfront_invalidate(distribution_id):\n        distribution_paths = [\"/*\"]\n        invalidation_resp = cloudfront.create_invalidation(\n            DistributionId=distribution_id,\n            InvalidationBatch={\n                'Paths': {\n                    'Quantity': len(distribution_paths),\n                    'Items': distribution_paths\n                },\n                'CallerReference': str(uuid4()),\n            })\n\n        cloudfront.get_waiter('invalidation_completed').wait(\n            DistributionId=distribution_id,\n            Id=invalidation_resp['Invalidation']['Id'])\n\n    def clean_bucket(target_bucket_name):\n        bucket = s3r.Bucket(target_bucket_name)\n\n        bucket.objects.all().delete()\n\n    def unzip(archive, contents_dir):\n        with ZipFile(archive, \"r\") as zip:\n            zip.extractall(contents_dir)\n\n    def upload(target_bucket_name, contents_dir, parent_path):\n        try:\n            for path, subdirs, files in os.walk(contents_dir):\n                for file in files:\n                    dest_path = path.replace(contents_dir,\"\")\n                    __s3file = os.path.normpath(dest_path + parent_path + '/' + file)[1:]\n                    __local_file = os.path.join(path, file)\n    \n                    if os.path.isdir(file):\n                        upload(target_bucket_name, file, __s3file)\n                    else:\n                        content_type = mimetypes.guess_type(__local_file)[0];\n                            \n                        if not content_type:\n                            content_type = 'binary/octet-stream';\n    \n                        s3c.upload_file(__local_file, target_bucket_name, __s3file, ExtraArgs={'ContentType': content_type})\n        except Exception as e:\n            logger.error(\"| unable to upload file to s3\")\n            logger.exception(e)\n\n    def deploy(br_client_download_url, target_bucket_name):\n        temp_br_client_file = \"/tmp/brclient.zip\"\n        contents_dir = \"/tmp/brclient\"\n\n        if os.path.isdir(contents_dir):\n            shutil.rmtree(contents_dir);\n\n        os.mkdir(contents_dir)\n\n        urlretrieve(br_client_download_url, temp_br_client_file)\n\n        logger.info(\"download BRClient finished\")\n\n        unzip(temp_br_client_file, contents_dir)\n\n        logger.info(\"unzip BRClient finished\")\n\n        with open(contents_dir + \"/aws_cognito_configuration.json\", \"w\") as aws_cognito_configuration_file:\n            json.dump({\n                \"AWS_REGION\": os.environ['AWS_REGION'],\n                \"COGNITO_IDENTITHY_POOL_ID\": os.environ['CognitoIdentityPoolId']\n            }, aws_cognito_configuration_file)\n\n        upload(target_bucket_name, contents_dir, '');\n\n        logger.info(\"upload BRClient finished\")\n\n\n    logger.info({ key:value for (key, value) in event.items() if key != 'ResponseURL'})\n\n    request_type = event['RequestType']\n    physical_id = event.get('PhysicalResourceId', None)\n    br_client_download_url = os.environ['BRClientDownloadUrl']\n    target_bucket_name = os.environ['TargetBucketName']\n    distribution_id = os.environ['DistributionId']\n\n    try:\n        if request_type == \"Create\":\n            physical_id = \"BRClientDeployment-%s\" % str(uuid4())\n        else:\n            if not physical_id:\n                cfn_error(\"invalid request: request type is '%s' but 'PhysicalResourceId' is not defined\" % {request_type})\n                return\n\n        if request_type == \"Delete\" or request_type == \"Update\":\n            clean_bucket(target_bucket_name)\n\n        if request_type == \"Update\" or request_type == \"Create\":\n            deploy(br_client_download_url, target_bucket_name)\n            cloudfront_invalidate(distribution_id)\n\n        cfn_send(event, context, CFN_SUCCESS, physicalResourceId=physical_id, responseData={\n          'BRClientDownloadUrl': br_client_download_url,\n        })\n    except Exception as e:\n        logger.error(\"| FAILED\")\n        logger.exception(e)\n        cfn_error(\"failed, please check cloudwatch log\")\n    \n      "
         },
         "Environment": {
           "Variables": {
@@ -222,6 +222,9 @@
             },
             "DistributionId": {
               "Ref": "BRClientCloudfront"
+            },
+            "CognitoIdentityPoolId": {
+              "Ref": "BRClientCognitoIdentityPool"
             }
           }
         },
@@ -239,7 +242,8 @@
       },
       "DependsOn": [
         "BRClientDeployLambdaRolePolicy",
-        "BRClientDeployLambdaRole"
+        "BRClientDeployLambdaRole",
+        "BRClientCognitoIdentityPool"
       ],
       "UpdateReplacePolicy": "Delete",
       "DeletionPolicy": "Delete"
@@ -333,7 +337,11 @@
         },
         "InstallLatestAwsSdk": false
       },
-      "DependsOn": ["BRClientDeployPolicy", "BRClientDeployLambda"],
+      "DependsOn": [
+        "BRClientDeployPolicy",
+        "BRClientDeployLambda",
+        "BRClientCognitoIdentityPool"
+      ],
       "UpdateReplacePolicy": "Delete",
       "DeletionPolicy": "Delete"
     },
@@ -356,6 +364,78 @@
             "Ref": "BRClientDeployInvokeRole"
           }
         ]
+      }
+    },
+    "BRClientCognitoIdentityPool": {
+      "Type": "AWS::Cognito::IdentityPool",
+      "Properties": {
+        "AllowUnauthenticatedIdentities": true
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "BRClientCognitoIdentityPoolUnauthenticatedRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "cognito-identity.amazonaws.com:aud": {
+                    "Ref": "BRClientCognitoIdentityPool"
+                  }
+                },
+                "ForAnyValue:StringLike": {
+                  "cognito-identity.amazonaws.com:amr": "unauthenticated"
+                }
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "cognito-identity.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        }
+      }
+    },
+    "BRClientCognitoIdentityPoolUnauthenticatedRolePolicy": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "bedrock:*",
+              "Effect": "Allow",
+              "Resource": "*"
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "BRClientCognitoIdentityPoolUnauthenticatedRolePolicy",
+        "Roles": [
+          {
+            "Ref": "BRClientCognitoIdentityPoolUnauthenticatedRole"
+          }
+        ]
+      }
+    },
+    "BRClientCognitoIdentityPoolRoleAttachment": {
+      "Type": "AWS::Cognito::IdentityPoolRoleAttachment",
+      "Properties": {
+        "IdentityPoolId": {
+          "Ref": "BRClientCognitoIdentityPool"
+        },
+        "Roles": {
+          "unauthenticated": {
+            "Fn::GetAtt": [
+              "BRClientCognitoIdentityPoolUnauthenticatedRole",
+              "Arn"
+            ]
+          }
+        }
       }
     }
   },

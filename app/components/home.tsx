@@ -4,6 +4,8 @@ require("../polyfill");
 
 import { useState, useEffect } from "react";
 
+import { fromCognitoIdentityPool } from "@aws-sdk/credential-providers";
+
 import styles from "./home.module.scss";
 
 import BotIcon from "../icons/bot.svg";
@@ -99,6 +101,45 @@ function useHtmlLang() {
   }, []);
 }
 
+function useAWSCongnito() {
+  const accessStore = useAccessStore();
+
+  useEffect(() => {
+    const initialize = async () => {
+      // try to load /aws_cognito_configuration.json if exists then auto load cognito credential
+      await fetch("/aws_cognito_configuration.json")
+        .then((res) => {
+          if (res.status != 200) {
+            return;
+          }
+
+          return res.json();
+        })
+        .then((cognitoConfiguration) => {
+          if (!cognitoConfiguration) {
+            return;
+          }
+
+          fromCognitoIdentityPool({
+            clientConfig: {
+              region: cognitoConfiguration.AWS_REGION,
+            },
+            identityPoolId: cognitoConfiguration.COGNITO_IDENTITHY_POOL_ID,
+          })().then((credential) => {
+            accessStore.update((access) => {
+              access.awsRegion = cognitoConfiguration.AWS_REGION;
+              access.awsAccessKeyId = credential.accessKeyId;
+              access.awsSecretAccessKey = credential.secretAccessKey;
+              access.awsSessionToken = credential.sessionToken || "";
+            });
+          });
+        });
+    };
+
+    initialize().catch(console.error);
+  }, []);
+}
+
 const useHasHydrated = () => {
   const [hasHydrated, setHasHydrated] = useState<boolean>(false);
 
@@ -190,6 +231,7 @@ export function Home() {
   useSwitchTheme();
   useLoadData();
   useHtmlLang();
+  useAWSCongnito();
 
   useEffect(() => {
     console.log("[Config] got config from build time", getClientConfig());
