@@ -31,6 +31,7 @@ import { AuthPage } from "./auth";
 import { getClientConfig } from "../config/client";
 import { ClientApi } from "../client/api";
 import { useAccessStore } from "../store";
+import { validateAWSCongnito } from "../client/platforms/aws_cognito";
 
 export function Loading(props: { noLogo?: boolean }) {
   return (
@@ -130,11 +131,27 @@ function Screen() {
   const isHome = location.pathname === Path.Home;
   const isAuth = location.pathname === Path.Auth;
   const isMobileScreen = useMobileScreen();
+  const [validatingAWSCognito, setValidatingAWSCognito] =
+    useState<boolean>(true);
   const shouldTightBorder =
     getClientConfig()?.isApp || (config.tightBorder && !isMobileScreen);
+  const accessStore = useAccessStore();
 
   useEffect(() => {
     loadAsyncGoogleFont();
+
+    validateAWSCongnito().then((credential) => {
+      if (credential) {
+        accessStore.update((access) => {
+          access.awsRegion = credential.awsRegion;
+          access.awsAccessKeyId = credential.awsAccessKeyId;
+          access.awsSecretAccessKey = credential.awsSecretAccessKey;
+          access.awsSessionToken = credential.awsSessionToken;
+        });
+      }
+
+      setValidatingAWSCognito(false);
+    });
   }, []);
 
   return (
@@ -146,23 +163,29 @@ function Screen() {
         }`
       }
     >
-      {isAuth ? (
-        <>
-          <AuthPage />
-        </>
+      {validatingAWSCognito ? (
+        <Loading />
       ) : (
         <>
-          <SideBar className={isHome ? styles["sidebar-show"] : ""} />
+          {isAuth ? (
+            <>
+              <AuthPage />
+            </>
+          ) : (
+            <>
+              <SideBar className={isHome ? styles["sidebar-show"] : ""} />
 
-          <div className={styles["window-content"]} id={SlotID.AppBody}>
-            <Routes>
-              <Route path={Path.Home} element={<Chat />} />
-              <Route path={Path.NewChat} element={<NewChat />} />
-              <Route path={Path.Masks} element={<MaskPage />} />
-              <Route path={Path.Chat} element={<Chat />} />
-              <Route path={Path.Settings} element={<Settings />} />
-            </Routes>
-          </div>
+              <div className={styles["window-content"]} id={SlotID.AppBody}>
+                <Routes>
+                  <Route path={Path.Home} element={<Chat />} />
+                  <Route path={Path.NewChat} element={<NewChat />} />
+                  <Route path={Path.Masks} element={<MaskPage />} />
+                  <Route path={Path.Chat} element={<Chat />} />
+                  <Route path={Path.Settings} element={<Settings />} />
+                </Routes>
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

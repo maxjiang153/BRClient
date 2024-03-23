@@ -278,6 +278,7 @@ export class ClaudeApi implements LLMApi {
       credentials: {
         accessKeyId: accessStore.awsAccessKeyId,
         secretAccessKey: accessStore.awsSecretAccessKey,
+        sessionToken: accessStore.awsSessionToken,
       },
     };
 
