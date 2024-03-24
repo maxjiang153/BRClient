@@ -2,6 +2,8 @@ import { fromCognitoIdentityPool } from "@aws-sdk/credential-providers";
 
 const AWS_COGNITO_AKSK_EXPIRATION_LOCAL_STORE_KET =
   "AWS_COGNITO_AKSK_EXPIRATION";
+const AWS_COGNITO_ACCESS_TOKEN_LOCAL_STORE_KET =
+  "AWS_COGNITO_ACCESS_TOKEN_LOCAL_STORE_KET";
 
 let cognitoUserPoolCustomDomain = "";
 let cognitoUserPoolUserPoolApplicationId = "";
@@ -133,8 +135,26 @@ async function getAWSCognitoToken(cognitoCode: any): Promise<any> {
         return;
       }
 
+      setCognitoAccessToken(data.access_token);
+
       return data.id_token;
     });
+}
+
+async function getAWSCognitoUserInfo(): Promise<any> {
+  return fetch(`${cognitoUserPoolCustomDomain}/oauth2/userInfo`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/x-amz-json-1.1",
+      Authorization: `Bearer ${getCognitoAccessToken()}`,
+    },
+  }).then((res) => {
+    if (res.status != 200) {
+      return;
+    }
+
+    return res.json();
+  });
 }
 
 function setCognitoAKSKExpiration(expiration: any) {
@@ -153,8 +173,17 @@ function isCognitoAKSKExpiration(): boolean {
   return new Date().getTime() > Number(value);
 }
 
+function setCognitoAccessToken(accessToken: any) {
+  localStorage.setItem(AWS_COGNITO_ACCESS_TOKEN_LOCAL_STORE_KET, accessToken);
+}
+
+function getCognitoAccessToken() {
+  return localStorage.getItem(AWS_COGNITO_ACCESS_TOKEN_LOCAL_STORE_KET);
+}
+
 export {
   validateAWSCongnito,
   isCognitoAKSKExpiration,
   redirectCognitoLoginPage,
+  getAWSCognitoUserInfo,
 };
