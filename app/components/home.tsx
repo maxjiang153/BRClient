@@ -140,22 +140,8 @@ function Screen() {
   useEffect(() => {
     loadAsyncGoogleFont();
 
-    validateAWSCongnito().then((credential) => {
-      if (credential) {
-        accessStore.update((access) => {
-          access.awsRegion = credential.awsRegion;
-          access.awsAccessKeyId = credential.awsAccessKeyId;
-          access.awsSecretAccessKey = credential.awsSecretAccessKey;
-          access.awsSessionToken = credential.awsSessionToken;
-          access.awsCognitoUser = true;
-        });
-      } else {
-        accessStore.update((access) => {
-          access.awsCognitoUser = false;
-        });
-      }
-
-      setValidatingAWSCognito(false);
+    validateAWSCongnito(accessStore).then((validating) => {
+      setValidatingAWSCognito(validating);
     });
   }, []);
 

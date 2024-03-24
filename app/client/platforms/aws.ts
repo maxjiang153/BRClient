@@ -32,6 +32,10 @@ import {
   getMessageImages,
   isVisionModel,
 } from "@/app/utils";
+import {
+  isCognitoAKSKExpiration,
+  redirectCognitoLoginPage,
+} from "./aws_cognito";
 // import vi from "@/app/locales/vi";
 
 export interface AWSListModelResponse {
@@ -258,6 +262,16 @@ export class ClaudeApi implements LLMApi {
 
     const models = useAppConfig.getState().models;
     const accessStore = useAccessStore.getState();
+
+    // if aksk expiration then login again
+    if (accessStore.awsCognitoUser && isCognitoAKSKExpiration()) {
+      console.log("AWS credentials is expired, auto re-loging.....");
+      options.onError?.(
+        new Error("AWS credentials is expired, auto re-loging....."),
+      );
+      redirectCognitoLoginPage();
+      return;
+    }
 
     if (
       accessStore.awsRegion === "" ||
