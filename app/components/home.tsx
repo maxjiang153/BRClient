@@ -147,6 +147,11 @@ function Screen() {
           access.awsAccessKeyId = credential.awsAccessKeyId;
           access.awsSecretAccessKey = credential.awsSecretAccessKey;
           access.awsSessionToken = credential.awsSessionToken;
+          access.awsCognitoUser = true;
+        });
+      } else {
+        accessStore.update((access) => {
+          access.awsCognitoUser = false;
         });
       }
 
