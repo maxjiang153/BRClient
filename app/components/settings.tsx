@@ -961,7 +961,8 @@ export function Settings() {
                     </Select>
                   </ListItem>
 
-                  {accessStore.provider === "AWS" ? (
+                  {accessStore.provider === "AWS" &&
+                  !accessStore.awsCognitoUser ? (
                     <>
                       <ListItem
                         title={Locale.Settings.Access.AWS.Region.Title}

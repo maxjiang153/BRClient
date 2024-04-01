@@ -35,6 +35,8 @@ https://github.com/DamonDeng/BRClient/releases/download/beta1/brclient_x86_mac.z
 
 
 
+Cloudformation template:
+https://raw.githubusercontent.com/DamonDeng/BRClient/main/aws/cloudformation/BRClientWebDeploy.json
 
 After the client was launched, click the gear icon to config your AWS region and credentials. Then you are ready to go.
 

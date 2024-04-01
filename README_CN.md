@@ -34,6 +34,8 @@ https://github.com/DamonDeng/BRClient/releases/download/beta1/brclient_x86_mac.z
 
 
 
+Cloudformation 模板:
+https://raw.githubusercontent.com/DamonDeng/BRClient/main/aws/cloudformation/BRClientWebDeploy.json
 
 打开程序以后在“配置”界面配置AWS Region, AK/SK 就可以开始使用。
 
