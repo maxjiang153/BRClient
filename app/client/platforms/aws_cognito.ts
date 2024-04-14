@@ -8,6 +8,8 @@ const AWS_COGNITO_ACCESS_TOKEN_LOCAL_STORE_KET =
   "AWS_COGNITO_ACCESS_TOKEN_LOCAL_STORE_KET";
 const AWS_COGNITO_ID_TOKEN_LOCAL_STORE_KET =
   "AWS_COGNITO_ID_TOKEN_LOCAL_STORE_KET";
+const AWS_COGNITO_REFRESH_TOKEN_LOCAL_STORE_KET =
+  "AWS_COGNITO_REFRESH_TOKEN_LOCAL_STORE_KET";
 
 let cognitoUserPoolCustomDomain = "";
 let cognitoUserPoolUserPoolApplicationId = "";
@@ -44,8 +46,10 @@ async function validateAWSCongnito(accessStore: any): Promise<any> {
         cognitoConfiguration.COGNITO_USER_POOL_APPLICATION_AUTHENTICATION;
 
       return validateAWSCongnitoExpriationStatus(cognitoConfiguration).then(
-        (credential) => {
-          if (credential) {
+        (data) => {
+          if (data.credential) {
+            const credential = data.credential;
+
             accessStore.update((access: any) => {
               access.awsRegion = credential.awsRegion;
               access.awsAccessKeyId = credential.awsAccessKeyId;
@@ -59,12 +63,10 @@ async function validateAWSCongnito(accessStore: any): Promise<any> {
               // refash page remove cognito auth code
               window.location.replace(window.location.origin);
               return true;
-            } else {
-              return false;
             }
-          } else {
-            return false;
           }
+
+          return data.keepLoading;
         },
       );
     });
@@ -84,11 +86,22 @@ async function validateAWSCongnitoExpriationStatus(
       console.log("cognito aksk expired, refresh cognito identity");
 
       return refreshCognitoIdentity(cognitoConfiguration);
+    } else {
+      return {
+        keepLoading: false,
+      };
     }
   }
 }
 
 async function cognitoAuthentication(cognitoConfiguration: any) {
+  const refreshToken = getCognitoRefreshToken();
+  if (refreshToken) {
+    console.log("cognito try using refresh token");
+
+    return refreshCognitoAuthentication(cognitoConfiguration, refreshToken);
+  }
+
   const cognitoAuthenticationCode = getCognitoAuthenticationCode();
 
   // if authentication code exists then validate
@@ -98,7 +111,11 @@ async function cognitoAuthentication(cognitoConfiguration: any) {
       cognitoAuthenticationCode,
     );
   } else {
-    return redirectCognitoLoginPage();
+    redirectCognitoLoginPage();
+
+    return {
+      keepLoading: true,
+    };
   }
 }
 
@@ -116,17 +133,54 @@ async function validateCognitoAuthenticationCode(
   cognitoConfiguration: any,
   cognitoAuthenticationCode: any,
 ) {
-  return getAWSCognitoTokenData(cognitoAuthenticationCode).then(
-    async (data) => {
-      setCognitoAccessToken(data.access_token);
-      setCognitoIdToken(data.id_token);
-      setCognitoTokenExpiration(
-        new Date().getTime() + Number(data.expires_in) * 1000,
-      );
+  return getAWSCognitoTokenData({
+    cognitoCode: cognitoAuthenticationCode,
+  }).then(async (data) => {
+    if (!data) {
+      redirectCognitoLoginPage();
 
-      return refreshCognitoIdentity(cognitoConfiguration);
-    },
-  );
+      return {
+        keepLoading: true,
+      };
+    }
+
+    setCognitoAccessToken(data.access_token);
+    setCognitoIdToken(data.id_token);
+    setCognitoRefreshToken(data.refresh_token);
+
+    setCognitoTokenExpiration(
+      new Date().getTime() + Number(data.expires_in) * 1000,
+    );
+
+    return refreshCognitoIdentity(cognitoConfiguration);
+  });
+}
+
+async function refreshCognitoAuthentication(
+  cognitoConfiguration: any,
+  refreshToken: any,
+) {
+  return getAWSCognitoTokenData({
+    refreshToken,
+  }).then(async (data) => {
+    if (!data) {
+      redirectCognitoLoginPage();
+
+      return {
+        keepLoading: true,
+      };
+    }
+
+    setCognitoAccessToken(data.access_token);
+    setCognitoIdToken(data.id_token);
+    setCognitoRefreshToken(data.refresh_token);
+
+    setCognitoTokenExpiration(
+      new Date().getTime() + Number(data.expires_in) * 1000,
+    );
+
+    return refreshCognitoIdentity(cognitoConfiguration);
+  });
 }
 
 async function refreshCognitoIdentity(cognitoConfiguration: any) {
@@ -145,15 +199,18 @@ async function refreshCognitoIdentity(cognitoConfiguration: any) {
     setCognitoAKSKExpiration(credential.expiration?.getTime());
 
     return {
-      awsRegion: cognitoConfiguration.AWS_REGION,
-      awsAccessKeyId: credential.accessKeyId,
-      awsSecretAccessKey: credential.secretAccessKey,
-      awsSessionToken: credential.sessionToken,
+      keepLoading: false,
+      credential: {
+        awsRegion: cognitoConfiguration.AWS_REGION,
+        awsAccessKeyId: credential.accessKeyId,
+        awsSecretAccessKey: credential.secretAccessKey,
+        awsSessionToken: credential.sessionToken,
+      },
     };
   });
 }
 
-async function getAWSCognitoTokenData(cognitoCode: any): Promise<any> {
+async function getAWSCognitoTokenData(data: any): Promise<any> {
   return fetch(`${cognitoUserPoolCustomDomain}/oauth2/token`, {
     method: "POST",
     headers: {
@@ -161,8 +218,9 @@ async function getAWSCognitoTokenData(cognitoCode: any): Promise<any> {
       Authorization: `Basic ${cognitoUserPoolApplicationAuthentication}`,
     },
     body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code: cognitoCode || "",
+      grant_type: data.cognitoCode ? "authorization_code" : "refresh_token",
+      code: data.cognitoCode || "",
+      refresh_token: data.refreshToken || "",
       redirect_uri: window.location.origin,
     }),
   }).then((res) => {
@@ -240,6 +298,14 @@ function setCognitoIdToken(idToken: any) {
 
 function getCognitoIdToken(): string {
   return localStorage.getItem(AWS_COGNITO_ID_TOKEN_LOCAL_STORE_KET) || "";
+}
+
+function setCognitoRefreshToken(refreshToken: any) {
+  localStorage.setItem(AWS_COGNITO_REFRESH_TOKEN_LOCAL_STORE_KET, refreshToken);
+}
+
+function getCognitoRefreshToken(): string {
+  return localStorage.getItem(AWS_COGNITO_REFRESH_TOKEN_LOCAL_STORE_KET) || "";
 }
 
 export {
