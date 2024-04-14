@@ -137,6 +137,7 @@ async function validateCognitoAuthenticationCode(
     cognitoCode: cognitoAuthenticationCode,
   }).then(async (data) => {
     if (!data) {
+      cleanLocalCognitoTokens();
       redirectCognitoLoginPage();
 
       return {
@@ -164,6 +165,7 @@ async function refreshCognitoAuthentication(
     refreshToken,
   }).then(async (data) => {
     if (!data) {
+      cleanLocalCognitoTokens();
       redirectCognitoLoginPage();
 
       return {
@@ -306,6 +308,12 @@ function setCognitoRefreshToken(refreshToken: any) {
 
 function getCognitoRefreshToken(): string {
   return localStorage.getItem(AWS_COGNITO_REFRESH_TOKEN_LOCAL_STORE_KET) || "";
+}
+
+function cleanLocalCognitoTokens() {
+  localStorage.removeItem(AWS_COGNITO_REFRESH_TOKEN_LOCAL_STORE_KET);
+  localStorage.removeItem(AWS_COGNITO_ID_TOKEN_LOCAL_STORE_KET);
+  localStorage.removeItem(AWS_COGNITO_ACCESS_TOKEN_LOCAL_STORE_KET);
 }
 
 export {
