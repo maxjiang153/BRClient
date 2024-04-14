@@ -157,7 +157,7 @@ export function SideBar(props: { className?: string }) {
         });
       });
     }
-  }, []);
+  }, [accessStore.awsCognitoUser]);
 
   useHotKey();
 

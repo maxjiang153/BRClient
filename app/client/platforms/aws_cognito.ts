@@ -1,9 +1,13 @@
 import { fromCognitoIdentityPool } from "@aws-sdk/credential-providers";
 
+const AWS_COGNITO_TOKEN_EXPIRATION_LOCAL_STORE_KET =
+  "AWS_COGNITO_TOKEN_EXPIRATION";
 const AWS_COGNITO_AKSK_EXPIRATION_LOCAL_STORE_KET =
   "AWS_COGNITO_AKSK_EXPIRATION";
 const AWS_COGNITO_ACCESS_TOKEN_LOCAL_STORE_KET =
   "AWS_COGNITO_ACCESS_TOKEN_LOCAL_STORE_KET";
+const AWS_COGNITO_ID_TOKEN_LOCAL_STORE_KET =
+  "AWS_COGNITO_ID_TOKEN_LOCAL_STORE_KET";
 
 let cognitoUserPoolCustomDomain = "";
 let cognitoUserPoolUserPoolApplicationId = "";
@@ -20,11 +24,17 @@ async function validateAWSCongnito(accessStore: any): Promise<any> {
     })
     .then(async (cognitoConfiguration) => {
       if (!cognitoConfiguration) {
+        console.log(
+          "cognito configuration is missing, skip cognito authentication.",
+        );
+
         accessStore.update((access: any) => {
           access.awsCognitoUser = false;
         });
         return false;
       }
+
+      console.log("start validating cognito authentication.");
 
       cognitoUserPoolCustomDomain =
         cognitoConfiguration.COGNITO_USER_POOL_CUSTOM_DOMAIN;
@@ -33,12 +43,7 @@ async function validateAWSCongnito(accessStore: any): Promise<any> {
       cognitoUserPoolApplicationAuthentication =
         cognitoConfiguration.COGNITO_USER_POOL_APPLICATION_AUTHENTICATION;
 
-      // validate aksk expiration status
-      if (!isCognitoAKSKExpiration()) {
-        return false;
-      }
-
-      return processCognitoConfiguration(cognitoConfiguration).then(
+      return validateAWSCongnitoExpriationStatus(cognitoConfiguration).then(
         (credential) => {
           if (credential) {
             accessStore.update((access: any) => {
@@ -49,17 +54,41 @@ async function validateAWSCongnito(accessStore: any): Promise<any> {
               access.awsCognitoUser = true;
             });
 
-            // refash page remove cognito auth code
-            window.location.replace(window.location.origin);
+            const cognitoAuthenticationCode = getCognitoAuthenticationCode();
+            if (cognitoAuthenticationCode) {
+              // refash page remove cognito auth code
+              window.location.replace(window.location.origin);
+              return true;
+            } else {
+              return false;
+            }
+          } else {
+            return false;
           }
-
-          return true;
         },
       );
     });
 }
 
-async function processCognitoConfiguration(cognitoConfiguration: any) {
+async function validateAWSCongnitoExpriationStatus(
+  cognitoConfiguration: any,
+): Promise<any> {
+  // validate cognito token expriation status
+  if (isCognitoTokenExpiration()) {
+    console.log("cognito token expriation try cognito authentication.");
+
+    return cognitoAuthentication(cognitoConfiguration);
+  } else {
+    // validate aksk expiration status
+    if (isCognitoAKSKExpiration()) {
+      console.log("cognito aksk expired, refresh cognito identity");
+
+      return refreshCognitoIdentity(cognitoConfiguration);
+    }
+  }
+}
+
+async function cognitoAuthentication(cognitoConfiguration: any) {
   const cognitoAuthenticationCode = getCognitoAuthenticationCode();
 
   // if authentication code exists then validate
@@ -87,30 +116,44 @@ async function validateCognitoAuthenticationCode(
   cognitoConfiguration: any,
   cognitoAuthenticationCode: any,
 ) {
-  return getAWSCognitoToken(cognitoAuthenticationCode).then(async (idToken) => {
-    return fromCognitoIdentityPool({
-      clientConfig: {
-        region: cognitoConfiguration.AWS_REGION,
-      },
-      logins: {
-        [`cognito-idp.${cognitoConfiguration.AWS_REGION}.amazonaws.com/${cognitoConfiguration.COGNITO_USER_POOL_ID}`]:
-          idToken,
-      },
-      identityPoolId: cognitoConfiguration.COGNITO_IDENTITHY_POOL_ID,
-    })().then((credential) => {
-      setCognitoAKSKExpiration(credential.expiration?.getTime());
+  return getAWSCognitoTokenData(cognitoAuthenticationCode).then(
+    async (data) => {
+      setCognitoAccessToken(data.access_token);
+      setCognitoIdToken(data.id_token);
+      setCognitoTokenExpiration(
+        new Date().getTime() + Number(data.expires_in) * 1000,
+      );
 
-      return {
-        awsRegion: cognitoConfiguration.AWS_REGION,
-        awsAccessKeyId: credential.accessKeyId,
-        awsSecretAccessKey: credential.secretAccessKey,
-        awsSessionToken: credential.sessionToken,
-      };
-    });
+      return refreshCognitoIdentity(cognitoConfiguration);
+    },
+  );
+}
+
+async function refreshCognitoIdentity(cognitoConfiguration: any) {
+  const idToken = getCognitoIdToken();
+
+  return fromCognitoIdentityPool({
+    clientConfig: {
+      region: cognitoConfiguration.AWS_REGION,
+    },
+    logins: {
+      [`cognito-idp.${cognitoConfiguration.AWS_REGION}.amazonaws.com/${cognitoConfiguration.COGNITO_USER_POOL_ID}`]:
+        idToken,
+    },
+    identityPoolId: cognitoConfiguration.COGNITO_IDENTITHY_POOL_ID,
+  })().then((credential) => {
+    setCognitoAKSKExpiration(credential.expiration?.getTime());
+
+    return {
+      awsRegion: cognitoConfiguration.AWS_REGION,
+      awsAccessKeyId: credential.accessKeyId,
+      awsSecretAccessKey: credential.secretAccessKey,
+      awsSessionToken: credential.sessionToken,
+    };
   });
 }
 
-async function getAWSCognitoToken(cognitoCode: any): Promise<any> {
+async function getAWSCognitoTokenData(cognitoCode: any): Promise<any> {
   return fetch(`${cognitoUserPoolCustomDomain}/oauth2/token`, {
     method: "POST",
     headers: {
@@ -122,23 +165,13 @@ async function getAWSCognitoToken(cognitoCode: any): Promise<any> {
       code: cognitoCode || "",
       redirect_uri: window.location.origin,
     }),
-  })
-    .then((res) => {
-      if (res.status != 200) {
-        return;
-      }
+  }).then((res) => {
+    if (res.status != 200) {
+      return;
+    }
 
-      return res.json();
-    })
-    .then((data) => {
-      if (!data) {
-        return;
-      }
-
-      setCognitoAccessToken(data.access_token);
-
-      return data.id_token;
-    });
+    return res.json();
+  });
 }
 
 async function getAWSCognitoUserInfo(): Promise<any> {
@@ -150,6 +183,7 @@ async function getAWSCognitoUserInfo(): Promise<any> {
     },
   }).then((res) => {
     if (res.status != 200) {
+      redirectCognitoLoginPage();
       return;
     }
 
@@ -173,12 +207,39 @@ function isCognitoAKSKExpiration(): boolean {
   return new Date().getTime() > Number(value);
 }
 
+function setCognitoTokenExpiration(expiration: any) {
+  localStorage.setItem(
+    AWS_COGNITO_TOKEN_EXPIRATION_LOCAL_STORE_KET,
+    expiration,
+  );
+}
+
+function isCognitoTokenExpiration(): boolean {
+  const value = localStorage.getItem(
+    AWS_COGNITO_TOKEN_EXPIRATION_LOCAL_STORE_KET,
+  );
+
+  if (!value) {
+    return true;
+  }
+
+  return new Date().getTime() > Number(value);
+}
+
 function setCognitoAccessToken(accessToken: any) {
   localStorage.setItem(AWS_COGNITO_ACCESS_TOKEN_LOCAL_STORE_KET, accessToken);
 }
 
 function getCognitoAccessToken() {
   return localStorage.getItem(AWS_COGNITO_ACCESS_TOKEN_LOCAL_STORE_KET);
+}
+
+function setCognitoIdToken(idToken: any) {
+  localStorage.setItem(AWS_COGNITO_ID_TOKEN_LOCAL_STORE_KET, idToken);
+}
+
+function getCognitoIdToken(): string {
+  return localStorage.getItem(AWS_COGNITO_ID_TOKEN_LOCAL_STORE_KET) || "";
 }
 
 export {
