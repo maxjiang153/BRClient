@@ -123,6 +123,30 @@ export const KnowledgeCutOffDate: Record<string, string> = {
 
 export const DEFAULT_MODELS = [
   {
+    name: "claude-3.5-sonnet",
+    available: true,
+    modelId: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    anthropic_version: "bedrock-2023-05-31",
+    displayName: "Claude3.5 sonnet",
+    provider: {
+      id: "aws",
+      providerName: "AWS",
+      providerType: "aws",
+    },
+  },
+  {
+    name: "claude-3-opus",
+    available: true,
+    modelId: "anthropic.claude-3-opus-20240229-v1:0",
+    anthropic_version: "bedrock-2023-05-31",
+    displayName: "Claude3 opus",
+    provider: {
+      id: "aws",
+      providerName: "AWS",
+      providerType: "aws",
+    },
+  },
+  {
     name: "claude-3-sonnet",
     available: true,
     modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
